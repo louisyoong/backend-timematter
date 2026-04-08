@@ -1,40 +1,21 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
 
-const db = new Database(path.join(process.cwd(), 'database.sqlite'));
+dotenv.config();
 
-// Enable foreign keys
-db.pragma('foreign_keys = ON');
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_KEY || '';
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-// Initialize tables if they don't exist
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_type TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    
-    -- Individual fields
-    title TEXT,
-    gender TEXT,
-    dob TEXT,
-    age INTEGER,
-    nationality TEXT,
-    religion TEXT,
-    address TEXT,
-    id_card_front_url TEXT,
-    id_card_back_url TEXT,
-    profile_photo_url TEXT,
+// Standard client — used for all normal DB operations
+export const supabase = createClient(supabaseUrl, supabaseKey);
 
-    -- Company fields
-    company_name TEXT,
-    company_address TEXT,
+// Admin client — used only for privileged auth operations (e.g. deleting auth users)
+// Requires SUPABASE_SERVICE_ROLE_KEY in .env (found in Supabase Dashboard → Settings → API)
+export const supabaseAdmin = serviceRoleKey
+    ? createClient(supabaseUrl, serviceRoleKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+    })
+    : null;
 
-    role TEXT DEFAULT 'USER',
-
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`);
-
-export default db;
+export default supabase;
