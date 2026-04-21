@@ -3,6 +3,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
+import organizationRoutes from './routes/organization';
+import eventRoutes from './routes/event';
 
 dotenv.config();
 
@@ -17,6 +19,8 @@ app.use('/uploads', express.static('uploads'));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/organizations', organizationRoutes);
+app.use('/api/events', eventRoutes);
 
 app.get('/', (req, res) => {
     res.send('API is running');

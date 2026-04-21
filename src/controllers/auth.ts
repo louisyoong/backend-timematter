@@ -263,6 +263,188 @@ export const completeProfile = async (req: AuthRequest, res: Response): Promise<
     }
 };
 
+// ─── PATCH /api/auth/profile ─────────────────────────────────────────────────
+
+/**
+ * Updates the authenticated user's profile.
+ * All fields are optional — only the fields provided will be updated.
+ *
+ * Individual editable fields:
+ *   name, title, gender, dateOfBirth (dd/mm/yyyy), age,
+ *   nationality, religion, address,
+ *   profilePhoto (Base64 — replaces old photo)
+ *
+ * Company editable fields:
+ *   name, company_name, company_address,
+ *   companyInfo (Base64 — replaces old doc),
+ *   profilePhoto (Base64 — replaces old photo)
+ *
+ * Note: email, account_type, role, id_card images cannot be changed here.
+ */
+export const updateProfile = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const supabaseUserId = req.supabaseUser!.id;
+
+        // Fetch current user record
+        const { data: currentUser, error: fetchError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('supabase_user_id', supabaseUserId)
+            .single();
+
+        if (fetchError || !currentUser) {
+            res.status(404).json({ error: 'Profile not found. Please complete your profile first.' });
+            return;
+        }
+
+        const updates: Record<string, any> = {};
+
+        // ── Shared fields (individual + company) ──────────────────────────
+        if (req.body.name !== undefined)       updates.name    = req.body.name    || null;
+        if (req.body.address !== undefined)    updates.address = req.body.address || null;
+
+        // ── Profile photo (re-upload if new base64 provided) ──────────────
+        if (req.body.profilePhoto) {
+            try {
+                // Delete old photo from storage if it exists
+                if (currentUser.profile_photo_url) {
+                    const oldPath = currentUser.profile_photo_url.match(/\/object\/public\/avatars\/(.+)$/)?.[1];
+                    if (oldPath) await supabase.storage.from('avatars').remove([oldPath]);
+                }
+                updates.profile_photo_url = await uploadBase64ToSupabase(req.body.profilePhoto, 'profiles');
+            } catch (uploadErr: any) {
+                res.status(400).json({ error: `Profile photo upload failed: ${uploadErr.message}` });
+                return;
+            }
+        }
+
+        // ── Individual-only fields ────────────────────────────────────────
+        if (currentUser.account_type === 'individual') {
+            if (req.body.title !== undefined)       updates.title       = req.body.title       || null;
+            if (req.body.gender !== undefined)      updates.gender      = req.body.gender      || null;
+            if (req.body.nationality !== undefined) updates.nationality = req.body.nationality || null;
+            if (req.body.religion !== undefined)    updates.religion    = req.body.religion    || null;
+
+            if (req.body.dateOfBirth !== undefined) {
+                updates.dob = formatDate(req.body.dateOfBirth);
+            }
+            if (req.body.age !== undefined) {
+                updates.age = parseInt(req.body.age);
+            }
+        }
+
+        // ── Company-only fields ───────────────────────────────────────────
+        if (currentUser.account_type === 'company') {
+            if (req.body.company_name !== undefined)    updates.company_name    = req.body.company_name    || null;
+            if (req.body.company_address !== undefined) updates.company_address = req.body.company_address || null;
+
+            if (req.body.companyInfo) {
+                try {
+                    if (currentUser.company_info_url) {
+                        const oldPath = currentUser.company_info_url.match(/\/object\/public\/avatars\/(.+)$/)?.[1];
+                        if (oldPath) await supabase.storage.from('avatars').remove([oldPath]);
+                    }
+                    updates.company_info_url = await uploadBase64ToSupabase(req.body.companyInfo, 'company-docs');
+                } catch (uploadErr: any) {
+                    res.status(400).json({ error: `Company document upload failed: ${uploadErr.message}` });
+                    return;
+                }
+            }
+        }
+
+        if (Object.keys(updates).length === 0) {
+            res.status(400).json({ error: 'No valid fields provided to update' });
+            return;
+        }
+
+        const { data: updatedUser, error: updateError } = await supabase
+            .from('users')
+            .update(updates)
+            .eq('supabase_user_id', supabaseUserId)
+            .select()
+            .single();
+
+        if (updateError) {
+            res.status(500).json({ error: `Database error: ${updateError.message}` });
+            return;
+        }
+
+        res.status(200).json({ message: 'Profile updated successfully', user: updatedUser });
+    } catch (err: any) {
+        console.error('UpdateProfile Error:', err);
+        res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+};
+
+// ─── POST /api/auth/change-password ──────────────────────────────────────────
+
+/**
+ * Allows a logged-in user to change their password.
+ * Requires their current password to confirm identity.
+ */
+export const changePassword = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const supabaseUserId = req.supabaseUser!.id;
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            res.status(400).json({ error: 'currentPassword and newPassword are required' });
+            return;
+        }
+
+        if (newPassword.length < 6) {
+            res.status(400).json({ error: 'New password must be at least 6 characters' });
+            return;
+        }
+
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('id, password_hash')
+            .eq('supabase_user_id', supabaseUserId)
+            .single();
+
+        if (error || !user) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+
+        if (!user.password_hash) {
+            res.status(400).json({
+                error: 'Your account uses Google or Facebook login and has no password set. Use "Forgot Password" to create one.',
+            });
+            return;
+        }
+
+        const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
+        if (!isMatch) {
+            res.status(401).json({ error: 'Current password is incorrect' });
+            return;
+        }
+
+        if (currentPassword === newPassword) {
+            res.status(400).json({ error: 'New password must be different from current password' });
+            return;
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        const { error: updateError } = await supabase
+            .from('users')
+            .update({ password_hash: hashedPassword })
+            .eq('supabase_user_id', supabaseUserId);
+
+        if (updateError) {
+            res.status(500).json({ error: `Database error: ${updateError.message}` });
+            return;
+        }
+
+        res.status(200).json({ message: 'Password changed successfully' });
+    } catch (err: any) {
+        console.error('ChangePassword Error:', err);
+        res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+};
+
 // ─── POST /api/auth/login ────────────────────────────────────────────────────
 
 /**
