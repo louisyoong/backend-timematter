@@ -1,5 +1,5 @@
 import { Response, NextFunction } from 'express';
-import { supabase } from '../db';
+import { db as supabase } from '../db';
 import { AuthRequest } from './auth';
 
 /**
