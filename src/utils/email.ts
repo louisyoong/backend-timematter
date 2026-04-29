@@ -1,144 +1,183 @@
-import * as net from 'net';
-import * as tls from 'tls';
+import { Resend } from 'resend';
 
-function b64(s: string): string {
-    return Buffer.from(s).toString('base64');
-}
+const resend = new Resend(process.env.RESEND_API_KEY);
+const FROM = process.env.RESEND_FROM || 'TimeMatter <onboarding@resend.dev>';
 
-/**
- * Sends an email via SMTP with STARTTLS (works with Brevo, Gmail, Outlook, etc.)
- * Configure via environment variables:
- *   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
- */
-function sendSmtpEmail(to: string, subject: string, html: string): Promise<void> {
-    const host = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
-    const port = parseInt(process.env.SMTP_PORT || '587', 10);
-    const user = process.env.SMTP_USER || '';
-    const pass = process.env.SMTP_PASS || '';
-    const from = process.env.SMTP_FROM || user;
+// ─── Join Event Confirmation ──────────────────────────────────────────────────
 
-    if (!user || !pass) {
-        return Promise.reject(new Error('SMTP_USER and SMTP_PASS must be set in .env'));
+export async function sendEventConfirmationEmail(
+    to: string,
+    attendeeName: string,
+    event: {
+        title: string;
+        event_date: string;
+        location: string | null;
+        category: string | null;
+        banner_image_url: string | null;
+        organizer_name: string | null;
     }
-
-    // Build RFC 2822 message
-    const message = [
-        `From: TimeMatter <${from}>`,
-        `To: ${to}`,
-        `Subject: ${subject}`,
-        `MIME-Version: 1.0`,
-        `Content-Type: text/html; charset=UTF-8`,
-        ``,
-        html,
-    ].join('\r\n');
-
-    return new Promise((resolve, reject) => {
-        let step = 0;
-        let tlsSocket: tls.TLSSocket | null = null;
-        let buf = '';
-
-        const write = (cmd: string) => {
-            const sock = tlsSocket || socket;
-            sock.write(cmd + '\r\n');
-        };
-
-        const onData = (raw: string) => {
-            buf += raw;
-
-            let idx: number;
-            while ((idx = buf.indexOf('\r\n')) !== -1) {
-                const line = buf.substring(0, idx);
-                buf = buf.substring(idx + 2);
-
-                // Skip multi-line continuation (e.g. "250-SIZE 10000000")
-                if (/^\d{3}-/.test(line)) continue;
-
-                const code = parseInt(line.substring(0, 3), 10);
-                if (isNaN(code)) continue;
-
-                if (code >= 400) {
-                    socket.destroy();
-                    return reject(new Error(`SMTP error ${code}: ${line}`));
-                }
-
-                switch (step) {
-                    case 0: // 220 greeting
-                        if (code === 220) { write(`EHLO localhost`); step = 1; }
-                        break;
-                    case 1: // 250 EHLO — request STARTTLS
-                        if (code === 250) { write('STARTTLS'); step = 2; }
-                        break;
-                    case 2: // 220 ready to upgrade
-                        if (code === 220) {
-                            tlsSocket = tls.connect({ socket, servername: host }, () => {
-                                write(`EHLO localhost`);
-                                step = 3;
-                            });
-                            tlsSocket.on('data', (d: Buffer) => onData(d.toString()));
-                            tlsSocket.on('error', (e: Error) => { socket.destroy(); reject(e); });
-                        }
-                        break;
-                    case 3: // 250 TLS EHLO — AUTH LOGIN
-                        if (code === 250) { write('AUTH LOGIN'); step = 4; }
-                        break;
-                    case 4: // 334 username prompt
-                        if (code === 334) { write(b64(user)); step = 5; }
-                        break;
-                    case 5: // 334 password prompt
-                        if (code === 334) { write(b64(pass)); step = 6; }
-                        break;
-                    case 6: // 235 auth success
-                        if (code === 235) { write(`MAIL FROM:<${from}>`); step = 7; }
-                        break;
-                    case 7: // 250 MAIL FROM accepted
-                        if (code === 250) { write(`RCPT TO:<${to}>`); step = 8; }
-                        break;
-                    case 8: // 250 RCPT TO accepted
-                        if (code === 250) { write('DATA'); step = 9; }
-                        break;
-                    case 9: // 354 ready for data
-                        if (code === 354) { write(message + '\r\n.'); step = 10; }
-                        break;
-                    case 10: // 250 message queued
-                        if (code === 250) { write('QUIT'); step = 11; }
-                        break;
-                    case 11: // 221 bye
-                        socket.destroy();
-                        resolve();
-                        break;
-                }
-            }
-        };
-
-        const socket = net.connect(port, host);
-        socket.on('data', (d: Buffer) => { if (!tlsSocket) onData(d.toString()); });
-        socket.on('error', (e: Error) => reject(e));
-        socket.setTimeout(30000, () => {
-            socket.destroy();
-            reject(new Error('SMTP connection timed out'));
-        });
+): Promise<void> {
+    const formattedDate = new Date(event.event_date).toLocaleString('en-US', {
+        weekday: 'long',
+        year:    'numeric',
+        month:   'long',
+        day:     'numeric',
+        hour:    '2-digit',
+        minute:  '2-digit',
     });
+
+    const bannerHtml = event.banner_image_url
+        ? `<img src="${event.banner_image_url}" alt="${event.title}"
+               style="width:100%;max-height:220px;object-fit:cover;border-radius:8px;
+                      display:block;margin-bottom:24px;" />`
+        : '';
+
+    const rows = [
+        { icon: '📅', label: 'Date',      value: formattedDate },
+        event.location     ? { icon: '📍', label: 'Location',  value: event.location }     : null,
+        event.organizer_name ? { icon: '🎤', label: 'Organizer', value: event.organizer_name } : null,
+        event.category     ? { icon: '🏷️', label: 'Category',  value: event.category.charAt(0).toUpperCase() + event.category.slice(1) } : null,
+    ].filter(Boolean) as { icon: string; label: string; value: string }[];
+
+    const tableRows = rows.map(r => `
+        <tr>
+          <td style="padding:8px 12px 8px 0;white-space:nowrap;vertical-align:top;">
+            <span style="font-size:16px;">${r.icon}</span>
+          </td>
+          <td style="padding:8px 0;color:#374151;font-size:14px;line-height:1.5;">
+            <strong style="color:#111827;">${r.label}:</strong>&nbsp;${r.value}
+          </td>
+        </tr>`).join('');
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+</head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0"
+             style="max-width:580px;background:#ffffff;border-radius:16px;
+                    overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+
+        <!-- Top bar -->
+        <tr>
+          <td style="background:#111827;padding:20px 32px;">
+            <span style="color:#ffffff;font-size:20px;font-weight:bold;letter-spacing:0.5px;">
+              TimeMatter
+            </span>
+          </td>
+        </tr>
+
+        <!-- Content -->
+        <tr>
+          <td style="padding:32px;">
+
+            ${bannerHtml}
+
+            <!-- Heading -->
+            <h1 style="margin:0 0 6px 0;font-size:26px;color:#111827;">You're registered! 🎉</h1>
+            <p style="margin:0 0 28px 0;color:#6b7280;font-size:15px;line-height:1.6;">
+              Hi <strong style="color:#111827;">${attendeeName || 'there'}</strong>,
+              your spot has been confirmed. We can't wait to see you there!
+            </p>
+
+            <!-- Event card -->
+            <table width="100%" cellpadding="0" cellspacing="0"
+                   style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:28px;">
+              <tr>
+                <td style="padding:20px 24px;">
+                  <p style="margin:0 0 16px 0;font-size:18px;font-weight:bold;color:#111827;
+                             border-bottom:1px solid #e5e7eb;padding-bottom:14px;">
+                    ${event.title}
+                  </p>
+                  <table cellpadding="0" cellspacing="0" width="100%">
+                    ${tableRows}
+                  </table>
+                </td>
+              </tr>
+            </table>
+
+            <!-- CTA note -->
+            <p style="color:#6b7280;font-size:14px;margin:0 0 28px 0;line-height:1.6;">
+              You can view this and all your upcoming events in the
+              <strong style="color:#111827;">My Tickets</strong> section of the TimeMatter app.
+            </p>
+
+            <hr style="border:none;border-top:1px solid #e5e7eb;margin:0 0 20px 0;" />
+            <p style="color:#9ca3af;font-size:12px;margin:0;line-height:1.6;">
+              You're receiving this email because you joined an event on TimeMatter.
+            </p>
+
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    const { error } = await resend.emails.send({
+        from:    FROM,
+        to:      [to],
+        subject: `You're registered: ${event.title}`,
+        html,
+    });
+
+    if (error) throw new Error(`Resend: ${error.message}`);
 }
 
-export function sendVerificationEmail(to: string, verificationUrl: string): Promise<void> {
+// ─── Password Reset ───────────────────────────────────────────────────────────
+
+export async function sendVerificationEmail(to: string, resetUrl: string): Promise<void> {
     const html = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #333;">Verify Your Email Address</h2>
-            <p>Thanks for signing up! Before you can log in, please verify your email address by clicking the button below.</p>
-            <div style="text-align: center; margin: 32px 0;">
-                <a href="${verificationUrl}"
-                   style="display: inline-block; padding: 14px 28px; background-color: #4F46E5;
-                          color: white; text-decoration: none; border-radius: 8px; font-size: 16px;">
-                    Verify My Email
-                </a>
-            </div>
-            <p style="color: #555;">Or copy and paste this link into your browser:</p>
-            <p style="word-break: break-all; color: #4F46E5;">${verificationUrl}</p>
-            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
-            <p style="color: #999; font-size: 12px;">
-                This link expires in 24 hours. If you did not create an account, you can safely ignore this email.
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8" /></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0"
+             style="max-width:580px;background:#ffffff;border-radius:16px;
+                    overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:#111827;padding:20px 32px;">
+            <span style="color:#ffffff;font-size:20px;font-weight:bold;">TimeMatter</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px;">
+            <h1 style="margin:0 0 8px 0;font-size:24px;color:#111827;">Reset your password</h1>
+            <p style="color:#6b7280;margin:0 0 28px 0;font-size:15px;line-height:1.6;">
+              We received a request to reset your password. Click the button below —
+              this link expires in <strong style="color:#111827;">1 hour</strong>.
             </p>
-        </div>
-    `;
-    return sendSmtpEmail(to, 'Verify Your Email Address', html);
+            <a href="${resetUrl}"
+               style="display:inline-block;padding:14px 32px;background:#111827;color:#ffffff;
+                      text-decoration:none;border-radius:8px;font-size:15px;font-weight:bold;">
+              Reset Password
+            </a>
+            <p style="color:#9ca3af;font-size:12px;margin:28px 0 0 0;">
+              If you didn't request this, you can safely ignore this email.
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    const { error } = await resend.emails.send({
+        from:    FROM,
+        to:      [to],
+        subject: 'Reset your TimeMatter password',
+        html,
+    });
+
+    if (error) throw new Error(`Resend: ${error.message}`);
 }

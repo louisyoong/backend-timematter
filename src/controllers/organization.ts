@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { supabase } from '../db';
+import { db as supabase } from '../db';
 import { AuthRequest } from '../middleware/auth';
 
 const uploadBase64ToSupabase = async (base64String: string, folder: string): Promise<string> => {

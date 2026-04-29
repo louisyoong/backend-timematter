@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { supabase } from '../db';
+import { db as supabase } from '../db';
 import { AuthRequest } from '../middleware/auth';
 import { sendVerificationEmail } from '../utils/email';
 import dotenv from 'dotenv';

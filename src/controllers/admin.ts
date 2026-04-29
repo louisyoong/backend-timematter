@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { supabase, supabaseAdmin } from '../db';
+import { db as supabase, supabaseAdmin } from '../db';
 import { AuthRequest } from '../middleware/auth';
 
 /**

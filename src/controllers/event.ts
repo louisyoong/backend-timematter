@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
-import { supabase } from '../db';
+import { db as supabase } from '../db';
 import { AuthRequest } from '../middleware/auth';
+import { sendEventConfirmationEmail } from '../utils/email';
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -357,12 +358,22 @@ export const joinEvent = async (req: AuthRequest, res: Response): Promise<void> 
         const supabaseUserId = req.supabaseUser!.id;
         const eventId = parseInt(req.params.id as string);
 
+        // Fetch user (need email + name for confirmation email)
         const { data: user } = await supabase
-            .from('users').select('id').eq('supabase_user_id', supabaseUserId).single();
+            .from('users').select('id, email, name').eq('supabase_user_id', supabaseUserId).single();
         if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
+        // Fetch event + organizer info for the confirmation email
         const { data: event } = await supabase
-            .from('events').select('id, status, title').eq('id', eventId).single();
+            .from('events')
+            .select(`
+                id, title, status, event_date, location, category, banner_image_url,
+                organizer_user_id,
+                users!events_organizer_user_id_fkey ( name )
+            `)
+            .eq('id', eventId)
+            .single();
+
         if (!event) { res.status(404).json({ error: 'Event not found' }); return; }
         if (event.status !== 'published')
             { res.status(400).json({ error: 'Cannot join an event that is not published' }); return; }
@@ -372,14 +383,27 @@ export const joinEvent = async (req: AuthRequest, res: Response): Promise<void> 
             .insert([{ event_id: eventId, user_id: user.id }]);
 
         if (error) {
-            // Unique constraint violation — already joined
             if (error.code === '23505') {
                 res.status(400).json({ error: 'You have already joined this event' }); return;
             }
             res.status(500).json({ error: error.message }); return;
         }
 
+        // Respond immediately — send email in the background (non-blocking)
         res.status(200).json({ message: `Successfully joined "${event.title}"` });
+
+        const organizerName = (event as any).users?.name || null;
+        sendEventConfirmationEmail(user.email, user.name || '', {
+            title:           event.title,
+            event_date:      event.event_date,
+            location:        event.location,
+            category:        event.category,
+            banner_image_url: event.banner_image_url,
+            organizer_name:  organizerName,
+        }).catch((err) => {
+            console.error('Failed to send join confirmation email:', err.message);
+        });
+
     } catch (err: any) {
         res.status(500).json({ error: err.message || 'Internal server error' });
     }
