@@ -2,7 +2,7 @@
 .env
 .env.local
 .env.production
-.env.example
+# .env.example is intentionally tracked (safe placeholder values only)
 
 # Dependencies
 node_modules/

@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 
-dotenv.config();
+dotenv.config({ path: '.env.local' }); // local secrets (gitignored)
+dotenv.config();                        // fallback to .env
 
 const supabaseUrl        = process.env.SUPABASE_URL             || '';
 const supabaseAnonKey    = process.env.SUPABASE_KEY             || '';

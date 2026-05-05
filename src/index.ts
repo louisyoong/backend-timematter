@@ -6,7 +6,8 @@ import adminRoutes from './routes/admin';
 import organizationRoutes from './routes/organization';
 import eventRoutes from './routes/event';
 
-dotenv.config();
+dotenv.config({ path: '.env.local' }); // local secrets (gitignored)
+dotenv.config();                        // fallback to .env
 
 const app = express();
 const port = process.env.PORT || 3000;
