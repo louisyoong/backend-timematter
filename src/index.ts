@@ -5,6 +5,7 @@ import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
 import organizationRoutes from './routes/organization';
 import eventRoutes from './routes/event';
+import articleRoutes from './routes/article';
 
 dotenv.config({ path: '.env.local' }); // local secrets (gitignored)
 dotenv.config();                        // fallback to .env
@@ -22,6 +23,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/organizations', organizationRoutes);
 app.use('/api/events', eventRoutes);
+app.use('/api/articles', articleRoutes);
 
 app.get('/', (req, res) => {
     res.send('API is running');

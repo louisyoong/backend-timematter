@@ -2,7 +2,7 @@ import { Router } from 'express';
 import {
     createEvent, getEvents, getMyEvents, getEventsByUser,
     getEvent, updateEvent, deleteEvent,
-    joinEvent, leaveEvent, getAttendees, getMyTickets,
+    joinEvent, leaveEvent, getAttendees, getMyTickets, checkInAttendee,
 } from '../controllers/event';
 import { authenticate, optionalAuthenticate } from '../middleware/auth';
 
@@ -29,6 +29,7 @@ router.post('/:id/join',      authenticate, joinEvent);          // Join event
 router.delete('/:id/join',    authenticate, leaveEvent);         // Leave event
 
 // ── Attendees (organizer/admin only) ─────────────────────────────────────────
-router.get('/:id/attendees',  authenticate, getAttendees);       // List attendees
+router.get('/:id/attendees',                    authenticate, getAttendees);       // List attendees
+router.patch('/:id/attendees/:userId/checkin',  authenticate, checkInAttendee);   // Mark attendee as checked-in
 
 export default router;

@@ -556,7 +556,7 @@ export const getAttendees = async (req: AuthRequest, res: Response): Promise<voi
         const { data: rows, error } = await supabase
             .from('event_attendees')
             .select(`
-                joined_at,
+                joined_at, checked_in, checked_in_at,
                 users ( id, name, email, profile_photo_url )
             `)
             .eq('event_id', eventId)
@@ -570,6 +570,8 @@ export const getAttendees = async (req: AuthRequest, res: Response): Promise<voi
             email:             row.users?.email,
             profile_photo_url: row.users?.profile_photo_url || null,
             joined_at:         row.joined_at,
+            checked_in:        row.checked_in ?? false,
+            checked_in_at:     row.checked_in_at ?? null,
         }));
 
         res.status(200).json({
@@ -578,6 +580,46 @@ export const getAttendees = async (req: AuthRequest, res: Response): Promise<voi
             total:      attendees.length,
             attendees,
         });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+};
+
+// ─── PATCH /api/events/:id/attendees/:userId/checkin ─────────────────────────
+// Marks a specific attendee as checked-in. Organizer (owner) or ADMIN only.
+
+export const checkInAttendee = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const supabaseUserId = req.supabaseUser!.id;
+        const eventId        = parseInt(req.params.id as string);
+        const attendeeUserId = parseInt(req.params.userId as string);
+        if (isNaN(eventId) || isNaN(attendeeUserId)) {
+            res.status(400).json({ error: 'Invalid ID' }); return;
+        }
+
+        const { data: requester } = await supabase
+            .from('users').select('id, role').eq('supabase_user_id', supabaseUserId).single();
+        if (!requester) { res.status(404).json({ error: 'User not found' }); return; }
+
+        const { data: event } = await supabase
+            .from('events').select('id, organizer_user_id').eq('id', eventId).single();
+        if (!event) { res.status(404).json({ error: 'Event not found' }); return; }
+
+        const isOwner = requester.id === event.organizer_user_id;
+        const isAdmin = requester.role === 'ADMIN';
+        if (!isOwner && !isAdmin) {
+            res.status(403).json({ error: 'Not authorized' }); return;
+        }
+
+        const { error } = await supabase
+            .from('event_attendees')
+            .update({ checked_in: true, checked_in_at: new Date().toISOString() })
+            .eq('event_id', eventId)
+            .eq('user_id', attendeeUserId);
+
+        if (error) { res.status(500).json({ error: error.message }); return; }
+
+        res.status(200).json({ success: true });
     } catch (err: any) {
         res.status(500).json({ error: err.message || 'Internal server error' });
     }
