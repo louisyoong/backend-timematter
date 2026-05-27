@@ -15,6 +15,8 @@ export async function sendEventConfirmationEmail(
         category: string | null;
         banner_image_url: string | null;
         organizer_name: string | null;
+        event_type?: string;
+        online_url?: string | null;
     }
 ): Promise<void> {
     const formattedDate = new Date(event.event_date).toLocaleString('en-US', {
@@ -32,12 +34,37 @@ export async function sendEventConfirmationEmail(
                       display:block;margin-bottom:24px;" />`
         : '';
 
+    const isOnline = event.event_type === 'online';
+
     const rows = [
         { icon: '📅', label: 'Date',      value: formattedDate },
-        event.location     ? { icon: '📍', label: 'Location',  value: event.location }     : null,
+        isOnline
+            ? { icon: '💻', label: 'Format', value: 'Online Event' }
+            : (event.location ? { icon: '📍', label: 'Location', value: event.location } : null),
         event.organizer_name ? { icon: '🎤', label: 'Organizer', value: event.organizer_name } : null,
         event.category     ? { icon: '🏷️', label: 'Category',  value: event.category.charAt(0).toUpperCase() + event.category.slice(1) } : null,
     ].filter(Boolean) as { icon: string; label: string; value: string }[];
+
+    const onlineLinkHtml = isOnline && event.online_url ? `
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+          <tr>
+            <td style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:20px 24px;">
+              <p style="margin:0 0 6px 0;font-size:13px;font-weight:bold;color:#15803d;
+                         text-transform:uppercase;letter-spacing:0.05em;">
+                🔗 Online Event Link
+              </p>
+              <p style="margin:0 0 14px 0;font-size:13px;color:#374151;line-height:1.5;">
+                Use the link below to join when the event starts. Keep this email handy!
+              </p>
+              <a href="${event.online_url}"
+                 style="display:inline-block;padding:12px 24px;background:#16a34a;color:#ffffff;
+                        text-decoration:none;border-radius:8px;font-size:14px;font-weight:bold;
+                        word-break:break-all;">
+                Join Event →
+              </a>
+            </td>
+          </tr>
+        </table>` : '';
 
     const tableRows = rows.map(r => `
         <tr>
@@ -100,6 +127,8 @@ export async function sendEventConfirmationEmail(
                 </td>
               </tr>
             </table>
+
+            ${onlineLinkHtml}
 
             <!-- CTA note -->
             <p style="color:#6b7280;font-size:14px;margin:0 0 28px 0;line-height:1.6;">

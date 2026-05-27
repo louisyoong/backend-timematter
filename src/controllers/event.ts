@@ -42,7 +42,7 @@ export const createEvent = async (req: AuthRequest, res: Response): Promise<void
 
         const { title, description, bannerImage, eventDate, location,
                 parkingInfo, ageRestriction, ageMin, ageMax,
-                status, category } = req.body;
+                status, category, eventType, onlineUrl } = req.body;
 
         if (!title?.trim())  { res.status(400).json({ error: 'Event title is required' }); return; }
         if (!eventDate)      { res.status(400).json({ error: 'Event date is required' }); return; }
@@ -83,6 +83,8 @@ export const createEvent = async (req: AuthRequest, res: Response): Promise<void
                 age_max:           ageValue === 'restricted' ? parseInt(ageMax) : null,
                 category:          category || null,
                 status:            status || 'draft',
+                event_type:        eventType === 'online' ? 'online' : 'offline',
+                online_url:        eventType === 'online' ? (onlineUrl || null) : null,
             }])
             .select().single();
 
@@ -368,6 +370,7 @@ export const joinEvent = async (req: AuthRequest, res: Response): Promise<void> 
             .from('events')
             .select(`
                 id, title, status, event_date, location, category, banner_image_url,
+                event_type, online_url,
                 organizer_user_id,
                 users!events_organizer_user_id_fkey ( name )
             `)
@@ -400,6 +403,8 @@ export const joinEvent = async (req: AuthRequest, res: Response): Promise<void> 
             category:        event.category,
             banner_image_url: event.banner_image_url,
             organizer_name:  organizerName,
+            event_type:      (event as any).event_type || 'offline',
+            online_url:      (event as any).online_url || null,
         }).catch((err) => {
             console.error('Failed to send join confirmation email:', err.message);
         });
@@ -466,6 +471,10 @@ export const updateEvent = async (req: AuthRequest, res: Response): Promise<void
         if (req.body.ageMax !== undefined)         updates.age_max         = req.body.ageMax ? parseInt(req.body.ageMax) : null;
         if (req.body.status !== undefined)         updates.status          = req.body.status;
         if (req.body.category !== undefined)       updates.category        = req.body.category || null;
+        if (req.body.eventType !== undefined) {
+            updates.event_type = req.body.eventType === 'online' ? 'online' : 'offline';
+            updates.online_url = req.body.eventType === 'online' ? (req.body.onlineUrl || null) : null;
+        }
 
         if (req.body.bannerImage) {
             try {

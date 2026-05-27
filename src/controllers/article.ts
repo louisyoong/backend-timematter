@@ -2,6 +2,84 @@ import { Request, Response } from 'express';
 import { db as supabase } from '../db';
 import { AuthRequest } from '../middleware/auth';
 
+// ─── GET /api/articles/mine ──────────────────────────────────────────────────
+// Returns articles authored by the authenticated user.
+
+export const getMyArticles = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const supabaseUserId = req.supabaseUser!.id;
+
+        const { data: user } = await supabase
+            .from('users').select('id').eq('supabase_user_id', supabaseUserId).single();
+        if (!user) { res.status(404).json({ error: 'User not found' }); return; }
+
+        const { data, error } = await supabase
+            .from('articles')
+            .select(SELECT_FIELDS)
+            .eq('author_user_id', user.id)
+            .order('published_at', { ascending: false });
+
+        if (error) { res.status(500).json({ error: error.message }); return; }
+
+        res.status(200).json({ articles: (data || []).map(formatArticle), total: data?.length ?? 0 });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+};
+
+// ─── PUT /api/articles/:id ───────────────────────────────────────────────────
+// Author or Admin — update title, content, published_at, banner.
+
+export const updateArticle = async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const supabaseUserId = req.supabaseUser!.id;
+        const id = parseInt(req.params.id as string);
+        if (isNaN(id)) { res.status(400).json({ error: 'Invalid article ID' }); return; }
+
+        const { data: user } = await supabase
+            .from('users').select('id, role').eq('supabase_user_id', supabaseUserId).single();
+        if (!user) { res.status(404).json({ error: 'User not found' }); return; }
+
+        // Verify ownership (or admin)
+        const { data: existing } = await supabase
+            .from('articles').select('id, author_user_id, banner_image_url, published_at').eq('id', id).single();
+        if (!existing) { res.status(404).json({ error: 'Article not found' }); return; }
+
+        const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(user.role);
+        if (existing.author_user_id !== user.id && !isAdmin) {
+            res.status(403).json({ error: 'Not authorised to edit this article.' }); return;
+        }
+
+        const { title, content, bannerImage, publishedAt } = req.body;
+
+        if (!title?.trim())   { res.status(400).json({ error: 'Title is required.' }); return; }
+        if (!content?.trim()) { res.status(400).json({ error: 'Content is required.' }); return; }
+
+        let banner_image_url: string | null = existing.banner_image_url ?? null;
+        if (bannerImage && bannerImage.startsWith('data:')) {
+            banner_image_url = await uploadBase64ToSupabase(bannerImage);
+        }
+
+        const { data: article, error } = await supabase
+            .from('articles')
+            .update({
+                title:            title.trim(),
+                content:          content.trim(),
+                banner_image_url,
+                published_at:     publishedAt || existing.published_at,
+            })
+            .eq('id', id)
+            .select(SELECT_FIELDS)
+            .single();
+
+        if (error || !article) { res.status(500).json({ error: error?.message || 'Update failed' }); return; }
+
+        res.status(200).json({ article: formatArticle(article) });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+};
+
 const uploadBase64ToSupabase = async (base64String: string): Promise<string> => {
     const matches = base64String.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
     let mimeType = 'image/jpeg';
