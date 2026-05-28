@@ -42,7 +42,7 @@ export const createEvent = async (req: AuthRequest, res: Response): Promise<void
 
         const { title, description, bannerImage, eventDate, location,
                 parkingInfo, ageRestriction, ageMin, ageMax,
-                status, category, eventType, onlineUrl } = req.body;
+                status, category, eventType, onlineUrl, country: eventCountry } = req.body;
 
         if (!title?.trim())  { res.status(400).json({ error: 'Event title is required' }); return; }
         if (!eventDate)      { res.status(400).json({ error: 'Event date is required' }); return; }
@@ -85,6 +85,7 @@ export const createEvent = async (req: AuthRequest, res: Response): Promise<void
                 status:            status || 'draft',
                 event_type:        eventType === 'online' ? 'online' : 'offline',
                 online_url:        eventType === 'online' ? (onlineUrl || null) : null,
+                country:           ['TH', 'MY'].includes(eventCountry) ? eventCountry : null,
             }])
             .select().single();
 
@@ -106,13 +107,14 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
         const limit    = parseInt((req.query.limit    as string) || '20');
         const offset   = parseInt((req.query.offset   as string) || '0');
         const category = req.query.category as string | undefined;
+        const country  = req.query.country  as string | undefined;
 
         let query = supabase
             .from('events')
             .select(`
                 id, title, description, banner_image_url, event_date,
                 location, parking_info, age_restriction, age_min, age_max,
-                category, status, created_at,
+                category, status, created_at, country,
                 organizations ( id, name, logo_url ),
                 event_attendees ( id )
             `, { count: 'exact' })
@@ -122,6 +124,10 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
 
         if (category && VALID_CATEGORIES.includes(category)) {
             query = query.eq('category', category);
+        }
+
+        if (country && ['TH', 'MY'].includes(country)) {
+            query = query.or(`country.eq.${country},country.is.null`);
         }
 
         const { data: events, error, count } = await query;
@@ -474,6 +480,9 @@ export const updateEvent = async (req: AuthRequest, res: Response): Promise<void
         if (req.body.eventType !== undefined) {
             updates.event_type = req.body.eventType === 'online' ? 'online' : 'offline';
             updates.online_url = req.body.eventType === 'online' ? (req.body.onlineUrl || null) : null;
+        }
+        if (req.body.country !== undefined) {
+            updates.country = ['TH', 'MY'].includes(req.body.country) ? req.body.country : null;
         }
 
         if (req.body.bannerImage) {
